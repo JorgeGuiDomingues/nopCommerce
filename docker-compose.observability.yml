@@ -1,0 +1,41 @@
+# Observability stack — separate from the main docker-compose.yml
+# Run with: docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+
+services:
+  # Jaeger — distributed tracing backend + UI
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: nopcommerce_jaeger
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC receiver
+      - "4318:4318"     # OTLP HTTP receiver
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
+  # Prometheus — metrics scraping + storage
+  prometheus:
+    image: prom/prometheus:v3.0.0
+    container_name: nopcommerce_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  # Grafana — dashboards and visualisation
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: nopcommerce_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+      - jaeger

@@ -1,0 +1,22 @@
+# Prometheus configuration for scraping nopCommerce metrics
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Scrape nopCommerce OpenTelemetry Prometheus endpoint
+  - job_name: 'nopcommerce'
+    metrics_path: '/metrics'
+    # When running locally (not in Docker), use host.docker.internal
+    static_configs:
+      - targets: ['host.docker.internal:5000']
+        labels:
+          app: 'nopcommerce'
+    # When running inside Docker network, use the service name
+    # static_configs:
+    #   - targets: ['nopcommerce_web:80']
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

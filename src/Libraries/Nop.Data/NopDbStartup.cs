@@ -1,4 +1,4 @@
-﻿using FluentMigrator;
+using FluentMigrator;
 using FluentMigrator.Runner;
 using FluentMigrator.Runner.Conventions;
 using FluentMigrator.Runner.Generators;
@@ -59,8 +59,10 @@ public partial class NopDbStartup : INopStartup
         services.AddTransient(serviceProvider =>
             serviceProvider.GetRequiredService<IDataProviderManager>().DataProvider);
 
-        //repositories	
-        services.AddScoped(typeof(IRepository<>), typeof(EntityRepository<>));
+        //repositories — EntityRepository is the concrete implementation,
+        //InstrumentedRepository wraps it with OpenTelemetry tracing spans
+        services.AddScoped(typeof(EntityRepository<>));
+        services.AddScoped(typeof(IRepository<>), typeof(InstrumentedRepository<>));
 
         if (!DataSettingsManager.IsDatabaseInstalled())
             return;

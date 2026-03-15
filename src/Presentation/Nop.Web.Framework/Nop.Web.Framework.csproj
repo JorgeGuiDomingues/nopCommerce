@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <Copyright>Copyright © Nop Solutions, Ltd</Copyright>
@@ -18,6 +18,11 @@
     <PackageReference Include="LigerShark.WebOptimizer.Core" Version="3.0.477" />
     <PackageReference Include="WebMarkupMin.AspNetCoreLatest" Version="2.19.0" />
     <PackageReference Include="WebMarkupMin.NUglify" Version="2.19.0" />
+    <!-- OpenTelemetry instrumentation -->
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.12.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.12.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.12.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.12.0-rc.1" />
   </ItemGroup>
 
   <ItemGroup>
