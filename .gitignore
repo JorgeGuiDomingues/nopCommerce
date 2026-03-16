@@ -206,3 +206,4 @@ src/Presentation/Nop.Web/wwwroot/sitemaps/*
 src/packages/*
 src/Tests/Nop.Tests/Connections.resx
 notes.md
+metrics.md

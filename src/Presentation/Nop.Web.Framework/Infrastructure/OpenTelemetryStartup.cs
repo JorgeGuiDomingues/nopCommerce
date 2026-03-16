@@ -73,6 +73,7 @@ public class OpenTelemetryStartup : INopStartup
                 metrics
                     .AddAspNetCoreInstrumentation()
                     .AddMeter(CatalogInstrumentation.MeterName)
+                    .AddMeter(Nop.Data.DataInstrumentation.MeterName)
                     // Prometheus exporter for scraping
                     .AddPrometheusExporter();
             });
@@ -121,8 +122,6 @@ public class OpenTelemetryStartup : INopStartup
 
     public void Configure(IApplicationBuilder application)
     {
-        // Map the Prometheus scraping endpoint at /metrics
-        application.UseOpenTelemetryPrometheusScrapingEndpoint();
     }
 
     /// <summary>

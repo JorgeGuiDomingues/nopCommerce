@@ -109,29 +109,42 @@ public class InstrumentedProductService : ProductService
     {
         using var activity = CatalogInstrumentation.ActivitySource.StartActivity("ProductService.SearchProducts");
 
-        // Record sanitised search metadata (no PII)
-        activity?.SetTag("search.has_keywords", !string.IsNullOrWhiteSpace(keywords));
-        activity?.SetTag("search.category_filtered", categoryIds != null && categoryIds.Any(id => id > 0));
-        activity?.SetTag("search.page_index", pageIndex);
-        activity?.SetTag("search.page_size", pageSize);
+        try
+        {
+            // Record sanitised search metadata (no PII)
+            activity?.SetTag("search.has_keywords", !string.IsNullOrWhiteSpace(keywords));
+            activity?.SetTag("search.category_filtered", categoryIds != null && categoryIds.Any(id => id > 0));
+            activity?.SetTag("search.page_index", pageIndex);
+            activity?.SetTag("search.page_size", pageSize);
 
-        var result = await base.SearchProductsAsync(
-            pageIndex, pageSize, categoryIds, manufacturerIds, storeId, vendorId,
-            warehouseId, productType, visibleIndividuallyOnly, excludeFeaturedProducts,
-            priceMin, priceMax, productTagId, keywords, searchDescriptions,
-            searchManufacturerPartNumber, searchSku, searchProductTags, languageId,
-            filteredSpecOptions, orderBy, showHidden, overridePublished);
+            var result = await base.SearchProductsAsync(
+                pageIndex, pageSize, categoryIds, manufacturerIds, storeId, vendorId,
+                warehouseId, productType, visibleIndividuallyOnly, excludeFeaturedProducts,
+                priceMin, priceMax, productTagId, keywords, searchDescriptions,
+                searchManufacturerPartNumber, searchSku, searchProductTags, languageId,
+                filteredSpecOptions, orderBy, showHidden, overridePublished);
 
-        var totalCount = result?.TotalCount ?? 0;
-        activity?.SetTag("search.total_results", totalCount);
+            var totalCount = result?.TotalCount ?? 0;
+            activity?.SetTag("search.total_results", totalCount);
 
-        // Record the custom metric
-        CatalogInstrumentation.SearchResultsCount.Record(
-            totalCount,
-            new KeyValuePair<string, object>("search.has_keywords", !string.IsNullOrWhiteSpace(keywords)),
-            new KeyValuePair<string, object>("search.category_filtered", categoryIds != null && categoryIds.Any(id => id > 0)));
+            // Record the custom metric
+            CatalogInstrumentation.SearchResultsCount.Record(
+                totalCount,
+                new KeyValuePair<string, object>("search.has_keywords", !string.IsNullOrWhiteSpace(keywords)),
+                new KeyValuePair<string, object>("search.category_filtered", categoryIds != null && categoryIds.Any(id => id > 0)));
 
-        return result;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            CatalogInstrumentation.ErrorCount.Add(1,
+                new KeyValuePair<string, object>("operation_name", "SearchProducts"),
+                new KeyValuePair<string, object>("error_type", ex.GetType().Name));
+            
+            activity?.SetTag("error", true);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
     }
 
     /// <summary>
@@ -145,16 +158,30 @@ public class InstrumentedProductService : ProductService
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var product = await base.GetProductByIdAsync(productId);
+        try
+        {
+            var product = await base.GetProductByIdAsync(productId);
 
-        sw.Stop();
-        activity?.SetTag("product.found", product != null);
+            sw.Stop();
+            activity?.SetTag("product.found", product != null);
 
-        // Record the custom metric
-        CatalogInstrumentation.ProductViewDuration.Record(
-            sw.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object>("product.found", product != null));
+            // Record the custom metric
+            CatalogInstrumentation.ProductViewDuration.Record(
+                sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object>("product.found", product != null));
 
-        return product;
+            return product;
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            CatalogInstrumentation.ErrorCount.Add(1,
+                new KeyValuePair<string, object>("operation_name", "GetProductById"),
+                new KeyValuePair<string, object>("error_type", ex.GetType().Name));
+            
+            activity?.SetTag("error", true);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
     }
 }

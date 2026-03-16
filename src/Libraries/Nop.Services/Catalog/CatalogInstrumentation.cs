@@ -58,4 +58,14 @@ public static class CatalogInstrumentation
             "nopcommerce.cache.misses",
             unit: "{misses}",
             description: "Number of cache misses in the static cache manager");
+
+    /// <summary>
+    /// Counter: track search and view errors.
+    /// Justification: allows creating critical alerts. If error rate rises above 1%, pager alerts support.
+    /// </summary>
+    public static readonly Counter<long> ErrorCount =
+        Meter.CreateCounter<long>(
+            "nopcommerce.catalog.errors",
+            unit: "{errors}",
+            description: "Number of errors encountered in catalog operations");
 }

@@ -91,6 +91,32 @@ Instrumentámos o fluxo **"Customer searches and views a product"** do nopCommer
 
 ---
 
+### Métrica 4: `nopcommerce.catalog.errors` (Counter)
+
+**O que mede:** Número de erros e exceções lançados durante as operações do catálogo (Pesquisa e Detalhes do Produto).
+
+**Justificação operacional:**
+> Permite criar alertas críticos na camada de Observabilidade. Se o rácio de erros subir (ex: timeouts na base de dados ou falha de componentes web), dispara um alerta que avisa preventivamente a equipa de suporte de que a funcionalidade principal da loja está instável para os clientes.
+
+**Tags:** `operation_name` (string), `error_type` (string)
+
+**Registado em:** `InstrumentedProductService.SearchProductsAsync()` e `GetProductByIdAsync()` — acionado num bloco `catch` sempre que uma exceção quebra o fluxo.
+
+---
+
+### Métrica 5: `nopcommerce.database.query_duration_ms` (Histograma)
+
+**O que mede:** Duração exata (em milissegundos) de resposta de todas as queries enviadas à Base de Dados pelo catálogo.
+
+**Justificação operacional:**
+> Se a página de um produto ou a pesquisa ficar lenta, uma métrica explícita de latência da DB diz-nos *imediatamente* se a culpa da degradação está na Base de Dados (ex: falhas de hardware, locks no SQL Server) ou no processamento CPU do servidor web (ASP.NET Core). Isto reduz substancialmente o Mean Time to Resolution (MTTR).
+
+**Tags:** `db.operation` (string), `db.entity` (string)
+
+**Registado em:** `InstrumentedRepository<T>` — mede o tempo que cada chamada CRUD do Linq2DB demora a processar e devolve no formato de um Snapshot de Latência.
+
+---
+
 ## 4. Exclusão de dados sensíveis (PII)
 
 O `PiiSanitizingProcessor` é um `BaseProcessor<Activity>` que corre **centralmente** no pipeline de exportação do OpenTelemetry — antes de qualquer span ser enviado para o Jaeger. Isto é melhor do que tentar proteger cada ponto de instrumentação individualmente.
@@ -159,9 +185,11 @@ A aplicação vai arrancar em `http://localhost:5000` (ou a porta configurada).
 1. Abrir `http://localhost:9090`
 2. No campo de query, escrever e executar:
    - `nopcommerce_search_results_count_bucket` — histograma de resultados de pesquisa
-   - `nopcommerce_catalog_product_view_duration_ms_bucket` — histograma de duração
+   - `nopcommerce_catalog_product_view_duration_ms_milliseconds_bucket` — histograma de duração
    - `nopcommerce_cache_hits_total` — total de cache hits
    - `nopcommerce_cache_misses_total` — total de cache misses
+   - `nopcommerce_catalog_errors_total` — total de erros registados no catálogo
+   - `nopcommerce_database_query_duration_ms_milliseconds_bucket` — histograma de latência das queries de base de dados
    - `rate(nopcommerce_cache_hits_total[5m])` — taxa de cache hits por segundo
 
 #### Passo 6: Verificar o dashboard no Grafana
