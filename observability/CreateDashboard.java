@@ -1,0 +1,168 @@
+import java.io.FileWriter;
+import java.io.IOException;
+
+public class CreateDashboard {
+    public static void main(String[] args) {
+        String json = """
+{
+  "uid": "nopcommerce_catalog_observability_v2",
+  "title": "NopCommerce - Catalog Flow Observability",
+  "description": "Visibility into the 'Customer searches and views a product' flow",
+  "tags": ["nopcommerce", "catalog", "otel"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "panels": [
+    {
+      "type": "text",
+      "title": "Welcome to Catalog Observability",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
+      "options": {
+        "content": "# Customer searches and views a product \\nThis dashboard tells the story of our application's catalog flow health. \\n- **Application Health & Activity:** Are there errors during search? Is the cache effective? How many results do searches yield? \\n- **Performance & Latency:** How fast are product pages rendering? Is the database slowing us down? \\n- **Trace View:** Deep dive into specific distributed traces for Catalog operations.",
+        "mode": "markdown"
+      }
+    },
+    {
+      "type": "row",
+      "title": "1. Application Health & Activity",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 1 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Search Operations Error Rate (Errors/sec)",
+      "gridPos": {"x": 0, "y": 5, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "rate(nopcommerce_catalog_errors_total[1m])",
+          "legendFormat": "Errors: {{error_type}} ({{operation_name}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "drawStyle": "line"
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Static Cache Hit Rate",
+      "gridPos": {"x": 8, "y": 5, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "rate(nopcommerce_cache_hits_total[1m])",
+          "legendFormat": "Hits",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(nopcommerce_cache_misses_total[1m])",
+          "legendFormat": "Misses",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"}
+        }
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "Search Results Count Distribution",
+      "gridPos": {"x": 16, "y": 5, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "sum(rate(nopcommerce_search_results_count_bucket[1m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "color": {"mode": "scheme", "scheme": "Greens"}
+      }
+    },
+    {
+      "type": "row",
+      "title": "2. Performance & Latency",
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 1 }
+    },
+    {
+      "type": "heatmap",
+      "title": "Product View Duration (Latency Distribution)",
+      "gridPos": {"x": 0, "y": 14, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "sum(rate(nopcommerce_catalog_product_view_duration_ms_milliseconds_bucket[1m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "color": {"mode": "scheme", "scheme": "Oranges"}
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "DB Latency Distribution for Catalog",
+      "gridPos": {"x": 12, "y": 14, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "sum(rate(nopcommerce_database_query_duration_ms_milliseconds_bucket[1m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "color": {"mode": "scheme", "scheme": "Blues"}
+      }
+    },
+    {
+      "type": "row",
+      "title": "3. Distributed Traces (Jaeger)",
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 1 }
+    },
+    {
+      "type": "table",
+      "title": "Recent Catalog Traces (Click TraceID to View Waterfall)",
+      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 12 },
+      "datasource": { "type": "jaeger", "uid": "jaeger" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "jaeger", "uid": "jaeger" },
+          "queryType": "search",
+          "service": "nopcommerce-web",
+          "limit": 20
+        }
+      ]
+    }
+  ]
+}
+""";
+        
+        String path = "/Users/jorgedomingues/Mestrado/1Ano/2Semestre/AS/P/nopCommerce/observability/grafana/dashboards/nopcommerce.json";
+        
+        try (FileWriter fileWriter = new FileWriter(path)) {
+            fileWriter.write(json);
+            System.out.println("Grafana Dashboard updated successfully via Java!");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
