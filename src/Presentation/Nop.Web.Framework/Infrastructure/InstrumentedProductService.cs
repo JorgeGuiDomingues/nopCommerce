@@ -107,10 +107,17 @@ public class InstrumentedProductService : ProductService
         bool showHidden = false,
         bool? overridePublished = null)
     {
-        using var activity = CatalogInstrumentation.ActivitySource.StartActivity("ProductService.SearchProducts");
+        using var activity = CatalogInstrumentation.ActivitySource.StartActivity("Search");
 
         try
         {
+            // --- CÓDIGO INJETADO PARA TESTES DO GRAFANA ---
+            if (!string.IsNullOrWhiteSpace(keywords) && keywords.ToUpper().Contains("ERROFATAL"))
+            {
+                throw new InvalidOperationException($"Erro simulado! Palavra pesquisada: {keywords}");
+            }
+            // ----------------------------------------------
+
             // Record sanitised search metadata (no PII)
             activity?.SetTag("search.has_keywords", !string.IsNullOrWhiteSpace(keywords));
             activity?.SetTag("search.category_filtered", categoryIds != null && categoryIds.Any(id => id > 0));
@@ -153,7 +160,7 @@ public class InstrumentedProductService : ProductService
     /// </summary>
     public override async Task<Product> GetProductByIdAsync(int productId)
     {
-        using var activity = CatalogInstrumentation.ActivitySource.StartActivity("ProductService.GetProductById");
+        using var activity = CatalogInstrumentation.ActivitySource.StartActivity("Catalogue");
         activity?.SetTag("product.id", productId);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();

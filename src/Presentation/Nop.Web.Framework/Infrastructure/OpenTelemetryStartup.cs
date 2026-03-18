@@ -45,7 +45,8 @@ public class OpenTelemetryStartup : INopStartup
                                    && !path.StartsWith("/js/", StringComparison.OrdinalIgnoreCase)
                                    && !path.StartsWith("/images/", StringComparison.OrdinalIgnoreCase)
                                    && !path.EndsWith(".ico", StringComparison.OrdinalIgnoreCase)
-                                   && !path.Equals("/health", StringComparison.OrdinalIgnoreCase);
+                                   && !path.Equals("/health", StringComparison.OrdinalIgnoreCase)
+                                   && !path.Equals("/metrics", StringComparison.OrdinalIgnoreCase);
                         };
 
                         // Enrich HTTP spans with sanitised route info
@@ -82,6 +83,9 @@ public class OpenTelemetryStartup : INopStartup
         // Remove the existing registration (from NopStartup, Order 2000)
         services.RemoveAll<IProductService>();
         services.AddScoped<IProductService, InstrumentedProductService>();
+
+        services.RemoveAll<IPriceCalculationService>();
+        services.AddScoped<IPriceCalculationService, InstrumentedPriceCalculationService>();
 
         // --- 3. Wrap IStaticCacheManager with instrumented decorator ---
         // We decorate the existing IStaticCacheManager by resolving the originally

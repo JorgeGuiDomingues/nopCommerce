@@ -12,19 +12,92 @@
       "title": "Welcome to Catalog Observability",
       "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
       "options": {
-        "content": "# Customer searches and views a product \nThis dashboard tells the story of our application's catalog flow health. \n- **Application Health & Activity:** Are there errors during search? Is the cache effective? How many results do searches yield? \n- **Performance & Latency:** How fast are product pages rendering? Is the database slowing us down? \n- **Trace View:** Deep dive into specific distributed traces for Catalog operations.",
+        "content": "# Customer searches and views a product \nThis dashboard tells the story of our application's catalog flow health. \n- **Overview Stats:** Vital signs at a glance.\n- **Application Health & Activity:** Are there errors during search? Is the cache effective? How many results do searches yield? \n- **Performance & Latency:** How fast are product pages rendering? Is the database slowing us down? \n- **Trace View:** Deep dive into specific distributed traces for Catalog operations.",
         "mode": "markdown"
       }
     },
     {
       "type": "row",
-      "title": "1. Application Health & Activity",
+      "title": "1. Overview Stats",
       "gridPos": { "x": 0, "y": 4, "w": 24, "h": 1 }
+    },
+    {
+      "type": "stat",
+      "title": "P95 Product View Latency (ms)",
+      "gridPos": {"x": 0, "y": 5, "w": 8, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(nopcommerce_catalog_product_view_duration_ms_milliseconds_bucket[5m])) by (le))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 500}, {"color": "red", "value": 1000}]}
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Current Error Rate (Errors/min)",
+      "gridPos": {"x": 8, "y": 5, "w": 8, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "sum(rate(nopcommerce_catalog_errors_total[5m])) * 60",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Static Cache Hit Ratio (Last 5m)",
+      "gridPos": {"x": 16, "y": 5, "w": 8, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "sum(rate(nopcommerce_cache_hits_total[5m])) / (sum(rate(nopcommerce_cache_hits_total[5m])) + sum(rate(nopcommerce_cache_misses_total[5m]))) * 100",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 50}, {"color": "green", "value": 80}]}
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "2. Application Health & Activity",
+      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 }
     },
     {
       "type": "timeseries",
       "title": "Search Operations Error Rate (Errors/sec)",
-      "gridPos": {"x": 0, "y": 5, "w": 8, "h": 8},
+      "gridPos": {"x": 0, "y": 10, "w": 8, "h": 8},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "targets": [
         {
@@ -46,8 +119,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Static Cache Hit Rate",
-      "gridPos": {"x": 8, "y": 5, "w": 8, "h": 8},
+      "title": "Static Cache Hit/Miss Rate",
+      "gridPos": {"x": 8, "y": 10, "w": 8, "h": 8},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "targets": [
         {
@@ -70,7 +143,7 @@
     {
       "type": "heatmap",
       "title": "Search Results Count Distribution",
-      "gridPos": {"x": 16, "y": 5, "w": 8, "h": 8},
+      "gridPos": {"x": 16, "y": 10, "w": 8, "h": 8},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "targets": [
         {
@@ -87,13 +160,32 @@
     },
     {
       "type": "row",
-      "title": "2. Performance & Latency",
-      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 1 }
+      "title": "3. Performance & Latency",
+      "gridPos": { "x": 0, "y": 18, "w": 24, "h": 1 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Product View P95 Latency",
+      "gridPos": {"x": 0, "y": 19, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(nopcommerce_catalog_product_view_duration_ms_milliseconds_bucket[1m])) by (le))",
+          "legendFormat": "P95 Latency",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {"mode": "fixed", "fixedColor": "orange"}
+        }
+      }
     },
     {
       "type": "heatmap",
       "title": "Product View Duration (Latency Distribution)",
-      "gridPos": {"x": 0, "y": 14, "w": 12, "h": 8},
+      "gridPos": {"x": 8, "y": 19, "w": 8, "h": 8},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "targets": [
         {
@@ -111,7 +203,7 @@
     {
       "type": "heatmap",
       "title": "DB Latency Distribution for Catalog",
-      "gridPos": {"x": 12, "y": 14, "w": 12, "h": 8},
+      "gridPos": {"x": 16, "y": 19, "w": 8, "h": 8},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "targets": [
         {
@@ -128,13 +220,13 @@
     },
     {
       "type": "row",
-      "title": "3. Distributed Traces (Jaeger)",
-      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 1 }
+      "title": "4. Distributed Traces (Jaeger)",
+      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 }
     },
     {
       "type": "table",
-      "title": "Recent Catalog Traces (Click TraceID to View Waterfall)",
-      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 12 },
+      "title": "Search Flow Traces (GET /search/)",
+      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 12 },
       "datasource": { "type": "jaeger", "uid": "jaeger" },
       "targets": [
         {
@@ -142,6 +234,23 @@
           "datasource": { "type": "jaeger", "uid": "jaeger" },
           "queryType": "search",
           "service": "nopcommerce-web",
+          "operation": "GET /search/",
+          "limit": 20
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Catalogue Core Spans (Product View)",
+      "gridPos": { "x": 12, "y": 28, "w": 12, "h": 12 },
+      "datasource": { "type": "jaeger", "uid": "jaeger" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "jaeger", "uid": "jaeger" },
+          "queryType": "search",
+          "service": "nopcommerce-web",
+          "operation": "Catalogue",
           "limit": 20
         }
       ]
