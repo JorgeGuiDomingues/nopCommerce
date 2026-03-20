@@ -159,11 +159,11 @@ dotnet restore Nop.sln
 dotnet run --project Presentation/Nop.Web/Nop.Web.csproj
 ```
 
-A aplicação vai arrancar em `http://localhost:5000` (ou a porta configurada).
+A aplicação vai arrancar em `http://localhost:5050` (ou a porta configurada).
 
 #### Passo 3: Gerar tráfego
 
-1. Abrir o browser em `http://localhost:5000`
+1. Abrir o browser em `http://localhost:5050`
 2. **Pesquisar:** Ir à barra de pesquisa, escrever "laptop" e submeter
 3. **Ver produto:** Clicar num dos produtos dos resultados da pesquisa
 
@@ -221,7 +221,7 @@ Se não tiveres Docker, podes verificar que o endpoint de métricas funciona loc
 cd src
 dotnet run --project Presentation/Nop.Web/Nop.Web.csproj
 # Noutra terminal:
-curl http://localhost:5000/metrics
+curl http://localhost:5050/metrics
 ```
 
 Deves ver output no formato Prometheus com as métricas `nopcommerce_*`.
@@ -300,6 +300,101 @@ O `NopStartup` principal tem `Order = 2000`. O nosso `OpenTelemetryStartup` prec
 Em vez de garantir em cada ponto de instrumentação que não há leak de PII, o `PiiSanitizingProcessor` funciona como uma rede de segurança centralizada. Qualquer atributo sensível que escape é apanhado antes da exportação.
 
 
+
+---
+
+## 8. Dashboard Grafana — Painéis de Traces
+
+A secção "4. Distributed Traces (Jaeger)" do dashboard contém **4 tabelas de traces**, cada uma focada numa camada diferente do fluxo. Isto permite seguir um pedido desde o HTTP até à base de dados:
+
+| Painel | Operation (Jaeger) | Camada | O que mostra |
+|--------|-------------------|--------|-------------|
+| **Search Flow Traces** | `GET /search/` | HTTP (ASP.NET auto-instrumentation) | Traces completos dos pedidos de pesquisa — o ponto de entrada do fluxo |
+| **Catalogue Core Spans** | `Catalogue` | Service (`InstrumentedProductService`) | Spans da lógica de negócio quando o utilizador abre a página de um produto |
+| **Pricing Calculation Traces** | `Pricing` | Service (`InstrumentedPriceCalculationService`) | Spans do cálculo de preços — executado durante a visualização de produtos |
+| **Database Layer Traces** | `Repository.GetAllPaged` | Data (`InstrumentedRepository<T>`) | Queries paginadas à BD — a operação mais pesada durante a pesquisa |
+
+### Porquê estas 4 operações?
+
+O fluxo "Customer searches and views a product" atravessa estas camadas em cascata:
+
+```
+Browser → GET /search/ (HTTP)
+            └─ Search (Service) → Repository.GetAllPaged (DB)
+         → GET /product-slug (HTTP)
+            └─ Catalogue (Service) → Repository.GetById (DB)
+               └─ Pricing (Service) → cache/DB lookups
+```
+
+Cada tabela de traces mostra um nível diferente desta cascata. Um operador pode:
+1. Ver no painel HTTP se os pedidos estão a chegar
+2. Ver no painel Service se a lógica de negócio está a executar normalmente
+3. Ver no painel Pricing se o cálculo de preços está lento
+4. Ver no painel DB se as queries estão a demorar (causa raiz mais comum de lentidão)
+
+---
+
+## 9. Load Test (k6)
+
+### Ficheiro
+
+`observability/loadtest/search-flow.js`
+
+### O que simula
+
+Cada utilizador virtual (VU) executa um ciclo completo e realista do fluxo "Customer searches and views a product" com **8 passos**:
+
+1. **Homepage** — `GET /` — chegada ao site
+2. **Pesquisa** — `GET /search?q={termo}` — pesquisa aleatória (14 termos diferentes)
+3. **Autocomplete** — `GET /catalog/searchtermautocomplete?term={3chars}` — simula o utilizador a escrever na barra de pesquisa
+4. **Página de produto** — `GET /{product-slug}` — abre um produto (dispara spans de Pricing)
+5. **Segundo produto** — `GET /{product-slug}` — utilizador compara produtos
+6. **Categoria** — `GET /{category-slug}` — navega uma categoria (15 categorias)
+7. **Fabricante** — `GET /{manufacturer-slug}` — navega por fabricante (Apple, HP, Nike)
+8. **Segunda pesquisa** — `GET /search?q={termo2}` — utilizador refina a pesquisa
+
+Cada passo tem think time aleatório (0.3s–2.5s) para simular comportamento humano real.
+
+### Perfil de carga
+
+| Fase | Duração | VUs | Objectivo |
+|------|---------|-----|-----------|
+| Ramp-up | 30s | 0 → 20 | Aquecer a app e cache |
+| Escalada | 30s | 20 → 50 | Carga moderada |
+| Pico sustentado | 1m | 50 | Carga realista de produção |
+| Spike | 30s | 50 → 80 | Stressar o sistema |
+| Spike hold | 30s | 80 | Testar estabilidade sob pressão |
+| Descida | 30s | 80 → 20 | Verificar recuperação |
+| Ramp-down | 30s | 20 → 0 | Encerramento gradual |
+
+**Duração total:** ~4 minutos | **Pico máximo:** 80 VUs concorrentes | **~8 pedidos HTTP por iteração**
+
+### Como correr
+
+```bash
+# Instalar k6 (macOS)
+brew install k6
+
+# Correr com configuração default (ramp-up 10→20 VUs, 2 min total)
+k6 run observability/loadtest/search-flow.js
+
+# Correr com configuração custom
+k6 run --vus 30 --duration 3m observability/loadtest/search-flow.js
+
+# Se a app correr noutra porta
+k6 run -e BASE_URL=http://localhost:8080 observability/loadtest/search-flow.js
+```
+
+### O que observar no Grafana durante o teste
+
+- **Search Throughput** — deve subir durante o ramp-up e estabilizar
+- **P95 Product View Latency** — pode subir sob carga (sinal de degradação)
+- **Cache Hit Ratio** — após os primeiros pedidos, deve subir (cache a aquecer)
+- **Error Rate** — deve manter-se perto de 0; se subir, indica que a app não aguenta a carga
+- **DB Latency** — se subir desproporcionalmente, indica bottleneck na BD
+- **Traces no Jaeger** — devem aparecer centenas de traces novos durante o teste
+
+---
 
 email: admin@yourStore.com
 password: admin

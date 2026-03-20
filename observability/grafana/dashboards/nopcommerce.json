@@ -254,6 +254,38 @@
           "limit": 20
         }
       ]
+    },
+    {
+      "type": "table",
+      "title": "Pricing Calculation Traces",
+      "gridPos": { "x": 0, "y": 40, "w": 12, "h": 12 },
+      "datasource": { "type": "jaeger", "uid": "jaeger" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "jaeger", "uid": "jaeger" },
+          "queryType": "search",
+          "service": "nopcommerce-web",
+          "operation": "Pricing",
+          "limit": 20
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Database Layer Traces (Repository.GetAllPaged)",
+      "gridPos": { "x": 12, "y": 40, "w": 12, "h": 12 },
+      "datasource": { "type": "jaeger", "uid": "jaeger" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "jaeger", "uid": "jaeger" },
+          "queryType": "search",
+          "service": "nopcommerce-web",
+          "operation": "Repository.GetAllPaged",
+          "limit": 20
+        }
+      ]
     }
   ]
 }
