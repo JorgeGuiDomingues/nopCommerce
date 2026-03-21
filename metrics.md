@@ -5,7 +5,7 @@
 Instrumentámos o fluxo **"Customer searches and views a product"** do nopCommerce com OpenTelemetry, cobrindo os três requisitos do enunciado:
 
 1. **Distributed Tracing** — spans desde o ponto de entrada HTTP até à base de dados
-2. **Três métricas custom** com justificação operacional real
+2. **Seis métricas custom** com justificação operacional real
 3. **Exclusão de dados sensíveis** — sem emails, dados de pagamento ou PII nos traces
 
 ### Fluxo instrumentado
@@ -28,9 +28,11 @@ Instrumentámos o fluxo **"Customer searches and views a product"** do nopCommer
 
 | Ficheiro | Camada | Propósito |
 |----------|--------|-----------|
-| `Nop.Services/Catalog/CatalogInstrumentation.cs` | Services | Define o `ActivitySource` e `Meter` partilhados + as 4 métricas |
+| `Nop.Services/Catalog/CatalogInstrumentation.cs` | Services | Define o `ActivitySource` e `Meter` partilhados + 5 métricas (search results, product view duration, cache hits, cache misses, errors) |
+| `Nop.Data/DataInstrumentation.cs` | Data | Define o `Meter` para a camada de dados + 1 métrica (database query duration) |
 | `Nop.Data/InstrumentedRepository.cs` | Data | Decorador genérico `InstrumentedRepository<T>` que envolve o `EntityRepository<T>` com spans de tracing para cada operação CRUD |
 | `Nop.Web.Framework/Infrastructure/InstrumentedProductService.cs` | Web.Framework | Subclasse de `ProductService` que faz override de `SearchProductsAsync()` e `GetProductByIdAsync()` com spans e métricas |
+| `Nop.Web.Framework/Infrastructure/InstrumentedPriceCalculationService.cs` | Web.Framework | Subclasse de `PriceCalculationService` que faz override de `GetFinalPriceAsync()` com span "Pricing" |
 | `Nop.Web.Framework/Infrastructure/InstrumentedStaticCacheManager.cs` | Web.Framework | Decorador de `IStaticCacheManager` que regista métricas de cache hit/miss |
 | `Nop.Web.Framework/Infrastructure/PiiSanitizingProcessor.cs` | Web.Framework | `BaseProcessor<Activity>` que remove/redacta PII dos spans antes da exportação |
 | `Nop.Web.Framework/Infrastructure/OpenTelemetryStartup.cs` | Web.Framework | `INopStartup` (Order=2001) que configura o SDK OpenTelemetry, regista os serviços instrumentados e o endpoint Prometheus |
@@ -43,7 +45,7 @@ Instrumentámos o fluxo **"Customer searches and views a product"** do nopCommer
 | Ficheiro | Alteração |
 |----------|-----------|
 | `Nop.Web.Framework.csproj` | Adicionados 4 pacotes NuGet do OpenTelemetry |
-| `Nop.Data/NopDbStartup.cs` | Alterada 1 linha: registo de `IRepository<>` agora usa `InstrumentedRepository<>` como decorador |
+| `Nop.Data/NopDbStartup.cs` | Alteradas 2 linhas: adicionado registo de `EntityRepository<>` como concreto e `IRepository<>` agora usa `InstrumentedRepository<>` como decorador |
 
 ---
 
@@ -142,7 +144,6 @@ O `PiiSanitizingProcessor` é um `BaseProcessor<Activity>` que corre **centralme
 #### Passo 1: Iniciar o stack de observabilidade
 
 ```bash
-cd /Users/jorgedomingues/Mestrado/1Ano/2Semestre/AS/P/nopCommerce
 docker compose -f docker-compose.observability.yml up -d
 ```
 
@@ -174,11 +175,12 @@ A aplicação vai arrancar em `http://localhost:5050` (ou a porta configurada).
 3. Clicar "Find Traces"
 4. Deves ver traces com spans hierárquicos:
    - `GET /search` (HTTP, automático)
-     - `ProductService.SearchProducts` (custom)
-       - `Repository.GetAllPaged` (DB)
+     - `Search` (custom, via `InstrumentedProductService`)
+       - `Repository.GetAllPaged` (DB, via `InstrumentedRepository<T>`)
    - `GET /product-slug` (HTTP, automático)
-     - `ProductService.GetProductById` (custom)
-       - `Repository.GetById` (DB)
+     - `Catalogue` (custom, via `InstrumentedProductService`)
+       - `Repository.GetById` (DB, via `InstrumentedRepository<T>`)
+     - `Pricing` (custom, via `InstrumentedPriceCalculationService`)
 
 #### Passo 5: Verificar métricas no Prometheus
 
@@ -207,7 +209,6 @@ A aplicação vai arrancar em `http://localhost:5050` (ou a porta configurada).
 ### Opção B: Correr tudo com Docker
 
 ```bash
-cd /Users/jorgedomingues/Mestrado/1Ano/2Semestre/AS/P/nopCommerce
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
 ```
 
@@ -342,32 +343,37 @@ Cada tabela de traces mostra um nível diferente desta cascata. Um operador pode
 
 ### O que simula
 
-Cada utilizador virtual (VU) executa um ciclo completo e realista do fluxo "Customer searches and views a product" com **8 passos**:
+Cada utilizador virtual (VU) executa um ciclo completo e agressivo do fluxo "Customer searches and views a product" com **10+ passos**:
 
 1. **Homepage** — `GET /` — chegada ao site
-2. **Pesquisa** — `GET /search?q={termo}` — pesquisa aleatória (14 termos diferentes)
+2. **Pesquisa** — `GET /search?q={termo}` — pesquisa aleatória (14 termos válidos)
 3. **Autocomplete** — `GET /catalog/searchtermautocomplete?term={3chars}` — simula o utilizador a escrever na barra de pesquisa
-4. **Página de produto** — `GET /{product-slug}` — abre um produto (dispara spans de Pricing)
+4. **Página de produto** — `GET /{product-slug}` — abre um produto (dispara spans de Catalogue + Pricing)
 5. **Segundo produto** — `GET /{product-slug}` — utilizador compara produtos
 6. **Categoria** — `GET /{category-slug}` — navega uma categoria (15 categorias)
 7. **Fabricante** — `GET /{manufacturer-slug}` — navega por fabricante (Apple, HP, Nike)
-8. **Segunda pesquisa** — `GET /search?q={termo2}` — utilizador refina a pesquisa
+8. **Pesquisa "lixo"** — `GET /search?q={garbage}` — termos que não existem para forçar cache misses e resultados vazios
+9. **Produto inválido** — `GET /{invalid-slug}` — slugs inexistentes para gerar 404s
+10. **Segunda pesquisa** — `GET /search?q={termo2}` — utilizador refina a pesquisa
+11. **Rapid-fire cache miss** — pesquisas com termos únicos (ex: `camera_7293`) para evitar cache hits
 
-Cada passo tem think time aleatório (0.3s–2.5s) para simular comportamento humano real.
+Cada passo tem think time curto (0.1s–0.5s) para maximizar a pressão no sistema.
 
 ### Perfil de carga
 
 | Fase | Duração | VUs | Objectivo |
 |------|---------|-----|-----------|
-| Ramp-up | 30s | 0 → 20 | Aquecer a app e cache |
-| Escalada | 30s | 20 → 50 | Carga moderada |
-| Pico sustentado | 1m | 50 | Carga realista de produção |
-| Spike | 30s | 50 → 80 | Stressar o sistema |
-| Spike hold | 30s | 80 | Testar estabilidade sob pressão |
-| Descida | 30s | 80 → 20 | Verificar recuperação |
-| Ramp-down | 30s | 20 → 0 | Encerramento gradual |
+| Ramp-up agressivo | 20s | 0 → 50 | Aquecer a app e cache rapidamente |
+| Escalada forte | 20s | 50 → 120 | Aumentar pressão |
+| Carga pesada sustentada | 1m | 120 → 150 | Carga de stress contínuo |
+| Spike extremo | 20s | 150 → 250 | Stressar tudo ao máximo |
+| Spike hold | 30s | 250 | Testar estabilidade sob pressão extrema |
+| Recuperação parcial | 20s | 250 → 150 | Verificar recuperação |
+| Sustentado novamente | 30s | 150 | Carga alta contínua |
+| Ramp-down | 20s | 150 → 50 | Descida gradual |
+| Cool-down | 20s | 50 → 0 | Encerramento |
 
-**Duração total:** ~4 minutos | **Pico máximo:** 80 VUs concorrentes | **~8 pedidos HTTP por iteração**
+**Duração total:** ~4 minutos | **Pico máximo:** 250 VUs concorrentes | **~10+ pedidos HTTP por iteração**
 
 ### Como correr
 
@@ -375,11 +381,11 @@ Cada passo tem think time aleatório (0.3s–2.5s) para simular comportamento hu
 # Instalar k6 (macOS)
 brew install k6
 
-# Correr com configuração default (ramp-up 10→20 VUs, 2 min total)
+# Correr com configuração default (ramp-up até 250 VUs, ~4 min total)
 k6 run observability/loadtest/search-flow.js
 
-# Correr com configuração custom
-k6 run --vus 30 --duration 3m observability/loadtest/search-flow.js
+# Correr com configuração custom (override VUs e duração)
+k6 run --vus 100 --duration 5m observability/loadtest/search-flow.js
 
 # Se a app correr noutra porta
 k6 run -e BASE_URL=http://localhost:8080 observability/loadtest/search-flow.js

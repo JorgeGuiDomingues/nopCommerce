@@ -1,80 +1,213 @@
-﻿﻿nopCommerce: free and open-source eCommerce solution
-===========
+# nopCommerce — Catalog Flow Observability
 
-[nopCommerce](https://www.nopcommerce.com/?utm_source=github&utm_medium=content&utm_campaign=homepage) is the best open-source eCommerce platform. nopCommerce is free, and it is the most popular ASP.NET Core shopping cart.
+**Assignment 01 — Observability in the Wild**
 
-![nopCommerce demo](https://www.nopcommerce.com/images/github/responsive_devices_codeplex.png#v1)
+Instrumented flow: **Customer searches and views a product** (Catalogue, Search, Pricing)
 
-### Key features ###
+---
 
-* The product is being developed and supported by the professional team since 2008.
-* nopCommerce has been downloaded more than 3,000,000 times.
-* The active developer community has more than 250,000 members.
-* nopCommerce runs on .NET 9 with an MS SQL 2012 (or higher) backend database.
-* nopCommerce is cross-platform, and you can run it on Windows, Linux, or Mac.
-* nopCommerce supports Docker out of the box, so you can easily run nopCommerce on a Linux machine.
-* nopCommerce supports PostgreSQL and MySQL databases.
-* nopCommerce fully supports web farms. You can read more about it [here](https://docs.nopcommerce.com/en/developer/tutorials/web-farms.html?utm_source=github&utm_medium=referral&utm_campaign=documentation&utm_content=text).  
-* All methods in nopCommerce are async.
-* nopCommerce supports multi-factor authentication out of the box.
-* Start our [online course for developers](https://nopcommerce.com/training?utm_source=github&utm_medium=referral&utm_campaign=course&utm_content=text) and get the practical and technical skills you need to run and customize nopCommerce websites.
+## Architecture Diagram
 
-![Logo](https://www.nopcommerce.com/images/github/logos.png#v2)
+<!-- TODO: Replace with actual architecture diagram image -->
+*[Insert architecture diagram here]*
 
-nopCommerce architecture follows well-known software patterns and the best security practices. The source code is fully customizable. Pluggable and clear architecture makes it easy to develop custom functionality and follow any business requirements.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Browser / k6 Load Test                                         │
+│  GET /search?q=laptop    GET /product-slug                      │
+└──────────────┬──────────────────────┬───────────────────────────┘
+               │                      │
+┌──────────────▼──────────────────────▼───────────────────────────┐
+│  Nop.Web  (ASP.NET Core — auto-instrumented HTTP spans)         │
+│  CatalogController.Search()    ProductController.ProductDetails()│
+└──────────────┬──────────────────────┬───────────────────────────┘
+               │                      │
+┌──────────────▼──────────────────────▼───────────────────────────┐
+│  Nop.Web.Framework                                              │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ OpenTelemetryStartup (INopStartup, Order=2001)             │ │
+│  │ InstrumentedProductService         → spans: Search,        │ │
+│  │                                      Catalogue             │ │
+│  │ InstrumentedPriceCalculationService → span: Pricing        │ │
+│  │ InstrumentedStaticCacheManager      → metrics: cache.hits, │ │
+│  │                                       cache.misses         │ │
+│  │ PiiSanitizingProcessor              → redacts PII          │ │
+│  └────────────────────────────────────────────────────────────┘ │
+└──────────────┬──────────────────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────────────────┐
+│  Nop.Services                                                   │
+│  CatalogInstrumentation (shared ActivitySource + Meter)          │
+│  ProductService (base class — virtual methods)                  │
+│  PriceCalculationService (base class — virtual methods)         │
+└──────────────┬──────────────────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────────────────┐
+│  Nop.Data                                                       │
+│  InstrumentedRepository<T> (decorator over EntityRepository<T>) │
+│  → spans: Repository.GetById, Repository.GetAllPaged, etc.     │
+│  → metric: database.query_duration_ms                           │
+│  EntityRepository<T> → Linq2DB → SQL Server 2019 Express        │
+└─────────────────────────────────────────────────────────────────┘
 
-Using the latest Microsoft technologies, nopCommerce provides high performance, stability, and security. nopCommerce is also fully compatible with Azure and web farms.
+         Telemetry Export
+         ┌──────┴──────┐
+    OTLP gRPC     Prometheus
+    (traces)      /metrics
+         │             │
+    ┌────▼───┐   ┌─────▼──────┐
+    │ Jaeger │   │ Prometheus │
+    │ :16686 │   │   :9090    │
+    └────┬───┘   └─────┬──────┘
+         └──────┬──────┘
+           ┌────▼────┐
+           │ Grafana │
+           │  :3000  │
+           └─────────┘
+```
 
-Our clear and detailed [documentation](https://docs.nopcommerce.com/developer/index.html?utm_source=github&utm_medium=referral&utm_campaign=documentation&utm_content=text) and [online course](https://nopcommerce.com/training?utm_source=github&utm_medium=referral&utm_campaign=course&utm_content=text) for developers will help you start with nopCommerce easily.
+---
 
+## Prerequisites
 
-### The advantages of working with nopCommerce ###
+- **Docker** and **Docker Compose** (for SQL Server, Jaeger, Prometheus, Grafana)
+- **.NET 9 SDK** (to build and run nopCommerce)
+- **k6** (for load testing) — install with `brew install k6` on macOS
 
-nopCommerce offers powerful [out-of-the-box features](https://www.nopcommerce.com/features?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=text) for creating an online store of any size and type.
+---
 
-nopCommerce is integrated with all the popular third-party services. You can find thousands of integrations on nopCommerce [Marketplace](https://www.nopcommerce.com/marketplace?utm_source=github&utm_medium=referral&utm_campaign=marketplace&utm_content=text).
+## Quick Start
 
-The [Web API plugin](https://www.nopcommerce.com/web-api?utm_source=github&utm_medium=referral&utm_campaign=WebAPI&utm_content=text) by the nopCommerce team lets you build integrations with third-party services or mobile applications using REST. The Web API plugin is available with source code and covers all methods of nopCommerce: backend and frontend. You can read more about it [here](https://www.nopcommerce.com/web-api?utm_source=github&utm_medium=referral&utm_campaign=WebAPI&utm_content=text).
+### 1. Start SQL Server (Database)
 
-Friendly members of the [nopCommerce community](https://www.nopcommerce.com/boards?utm_source=github&utm_medium=referral&utm_campaign=forum&utm_content=text) will always help with advice and share their experiences. nopCommerce core development team provides [professional support](https://www.nopcommerce.com/nopcommerce-premium-support-services?utm_source=github&utm_medium=referral&utm_campaign=premium_support&utm_content=text) within 24 hours.
+```bash
+docker compose up -d
+```
 
+This starts **SQL Server 2019 Express** on port `1433` (container: `nopcommerce_mssql_server`).
 
-## Store demo ##
+### 2. Start the Observability Stack
 
-Evaluate the functionality and convenience of nopCommerce as a customer and store owner.
+```bash
+docker compose -f docker-compose.observability.yml up -d
+```
 
-Front End | Admin area
-----|------
-[![ScreenShot](https://www.nopcommerce.com/images/github/public-demo.png#v1)](https://demo.nopcommerce.com?utm_source=github&utm_medium=referral&utm_campaign=demo_store&utm_content=button) | [![ScreenShot](https://www.nopcommerce.com/images/github/admin-demo.png#v1)](https://admin-demo.nopcommerce.com/admin?utm_source=github&utm_medium=referral&utm_campaign=demo_store&utm_content=button)
+This starts:
+| Service      | URL                        | Purpose                |
+|--------------|----------------------------|------------------------|
+| **Jaeger**   | http://localhost:16686      | Distributed traces UI  |
+| **Prometheus** | http://localhost:9090     | Metrics storage        |
+| **Grafana**  | http://localhost:3000       | Dashboards (admin/admin) |
 
+### 3. Build and Run nopCommerce
 
-### nopCommerce resources ###
+```bash
+cd src
+dotnet restore Nop.sln
+dotnet run --project Presentation/Nop.Web/Nop.Web.csproj
+```
 
-nopCommerce official site: [https://www.nopcommerce.com](https://www.nopcommerce.com/?utm_source=github&utm_medium=referral&utm_campaign=homepage&utm_content=links)
+The application starts at **http://localhost:5050**.
 
-* [Demo store](https://www.nopcommerce.com/demo?utm_source=github&utm_medium=referral&utm_campaign=demo_store&utm_content=links)
-* [Download nopCommerce](https://www.nopcommerce.com/download-nopcommerce?utm_source=github&utm_medium=referral&utm_campaign=download_nop&utm_content=links)
-* [Online course for developers](https://nopcommerce.com/training?utm_source=github&utm_medium=referral&utm_campaign=course&utm_content=links)
-* [Feature list](https://www.nopcommerce.com/features?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=links)
-* [Web API plugin](https://www.nopcommerce.com/web-api?utm_source=github&utm_medium=referral&utm_campaign=WebAPI&utm_content=links)
-* [nopCommerce documentation](https://docs.nopcommerce.com?utm_source=github&utm_medium=referral&utm_campaign=documentation&utm_content=links)
-* [Community forums](https://www.nopcommerce.com/boards?utm_source=github&utm_medium=referral&utm_campaign=forum&utm_content=links)
-* [Premium support services](https://www.nopcommerce.com/nopcommerce-premium-support-services?utm_source=github&utm_medium=referral&utm_campaign=premium_support&utm_content=links)
-* [Certified developer program](https://www.nopcommerce.com/certified-developer-program?utm_source=github&utm_medium=referral&utm_campaign=certified_developer&utm_content=links)
-* [nopCommerce partners](https://www.nopcommerce.com/partners?utm_source=github&utm_medium=referral&utm_campaign=solution_partners&utm_content=links)
+> **Note:** On macOS, port 5000 is used by AirPlay. The app is configured to use port 5050 in `src/Presentation/Nop.Web/App_Data/appsettings.json`.
 
-nopCommerce YouTube: [The Architecture behind the nopCommerce eCommerce Platform](https://www.youtube.com/watch?v=6gLbizzSA9o&list=PLnL_aDfmRHwtJmzeA7SxrpH3-XDY2ue0a)
+### 4. View the Grafana Dashboard
 
+1. Open http://localhost:3000 (login: `admin` / `admin`)
+2. Go to **Dashboards** → **nopCommerce** → **NopCommerce - Catalog Flow Observability**
 
-### Earn with nopCommerce ###
+The dashboard is auto-provisioned and contains 4 sections:
+- **Overview Stats** — P95 latency, error rate, cache hit ratio
+- **Application Health & Activity** — error rate timeseries, cache hit/miss rate, search results distribution
+- **Performance & Latency** — P95 latency line chart, product view duration heatmap, DB latency heatmap
+- **Distributed Traces (Jaeger)** — trace tables for Search, Catalogue, Pricing, and Database layers
 
-60,000 stores worldwide are powered by nopCommerce, and 10,000 new stores open every year. nopCommerce [solution partners’ directory](https://www.nopcommerce.com/partners?utm_source=github&utm_medium=referral&utm_campaign=solution_partners&utm_content=text_become_partner) gets 80,000+ page views per year from store owners who are looking for a partner to build a store from scratch, migrate from another platform, or improve and customize an existing store.
+### 5. Run the Load Test
 
-Become a solution partner of nopCommerce and get new clients – [learn more](https://www.nopcommerce.com/become-partner?utm_source=github&utm_medium=referral&utm_campaign=become-partner&utm_content=learn_more).
+```bash
+k6 run observability/loadtest/search-flow.js
+```
 
-Create a new graphical theme or develop a new plugin or integration and sell it on the nopCommerce [Marketplace](https://www.nopcommerce.com/marketplace?utm_source=github&utm_medium=referral&utm_campaign=marketplace&utm_content=text_sell_on_marketplace).
+The load test simulates the full user journey:
+1. Homepage visit
+2. Product search (`GET /search?q={term}`)
+3. Autocomplete (`GET /catalog/searchtermautocomplete`)
+4. Product detail page (triggers Catalogue + Pricing spans)
+5. Category and manufacturer browsing
+6. Invalid requests (to stress error handling and cache)
 
+**Load profile:** ramps up to 250 concurrent virtual users over ~4 minutes with spike patterns.
 
-### Contribute ###
+> Run the load test while watching the Grafana dashboard to see metrics and traces populate in real time.
 
-As a free and open-source project, we are very grateful to everyone who helps us to develop nopCommerce. Please find more details about the options and bonuses for contributors at [contribute page](https://www.nopcommerce.com/contribute?utm_source=github&utm_medium=referral&utm_campaign=contribute&utm_content=text).
+### 6. Verify Traces in Jaeger
+
+1. Open http://localhost:16686
+2. Select service: `nopcommerce-web`
+3. Click **Find Traces**
+4. You should see hierarchical spans:
+   - `GET /search` (HTTP) → `Search` (service) → `Repository.GetAllPaged` (DB)
+   - `GET /product-slug` (HTTP) → `Catalogue` (service) → `Pricing` (service) → `Repository.GetById` (DB)
+
+### 7. Verify Metrics in Prometheus
+
+Open http://localhost:9090 and query:
+- `nopcommerce_search_results_count_bucket` — search results histogram
+- `nopcommerce_catalog_product_view_duration_ms_milliseconds_bucket` — product view latency
+- `nopcommerce_cache_hits_total` / `nopcommerce_cache_misses_total` — cache counters
+- `nopcommerce_catalog_errors_total` — error counter
+- `nopcommerce_database_query_duration_ms_milliseconds_bucket` — DB query latency
+
+---
+
+## What Was Changed
+
+Only **2 original nopCommerce files** were modified. Everything else is new (additive).
+
+| File | Change |
+|------|--------|
+| `Nop.Web.Framework.csproj` | Added 4 OpenTelemetry NuGet packages |
+| `Nop.Data/NopDbStartup.cs` | Changed `IRepository<>` registration to use `InstrumentedRepository<>` decorator (2 lines) |
+
+### New Files
+
+| File | Layer | Purpose |
+|------|-------|---------|
+| `CatalogInstrumentation.cs` | Services | Shared `ActivitySource` and `Meter` + 5 metric definitions |
+| `DataInstrumentation.cs` | Data | `Meter` for DB query duration metric |
+| `InstrumentedRepository.cs` | Data | Decorator wrapping `EntityRepository<T>` with tracing spans |
+| `InstrumentedProductService.cs` | Web.Framework | Overrides `SearchProductsAsync` and `GetProductByIdAsync` with spans and metrics |
+| `InstrumentedPriceCalculationService.cs` | Web.Framework | Overrides `GetFinalPriceAsync` with `Pricing` span |
+| `InstrumentedStaticCacheManager.cs` | Web.Framework | Decorator tracking cache hit/miss metrics |
+| `PiiSanitizingProcessor.cs` | Web.Framework | Redacts PII (emails, tokens, etc.) from traces before export |
+| `OpenTelemetryStartup.cs` | Web.Framework | `INopStartup` (Order=2001) configuring OpenTelemetry SDK and DI replacements |
+| `docker-compose.observability.yml` | Root | Jaeger + Prometheus + Grafana stack |
+| `observability/prometheus.yml` | Root | Prometheus scrape config for `/metrics` endpoint |
+| `observability/grafana/provisioning/` | Root | Auto-provisioning for Grafana datasources and dashboards |
+| `observability/loadtest/search-flow.js` | Root | k6 load test script |
+
+---
+
+## Custom Metrics
+
+| Metric | Type | Justification |
+|--------|------|---------------|
+| `search.results_count` | Histogram | Detects empty search results from corrupted indexes or failed migrations |
+| `product_view_duration_ms` | Histogram | Signals performance regressions in pricing/DB before users notice |
+| `cache.hits` / `cache.misses` | Counters | Detects cache storms after deployments or TTL misconfigurations |
+| `catalog.errors` | Counter | Enables alerting when the catalog flow degrades (timeouts, SQL errors) |
+| `database.query_duration_ms` | Histogram | Isolates DB vs application-layer latency for faster root cause analysis |
+
+---
+
+## Stopping Everything
+
+```bash
+# Stop SQL Server
+docker compose down
+
+# Stop observability stack
+docker compose -f docker-compose.observability.yml down
+
+# Stop nopCommerce (Ctrl+C in the terminal running dotnet)
+```
