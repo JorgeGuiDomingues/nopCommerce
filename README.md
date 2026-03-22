@@ -1,6 +1,6 @@
 # nopCommerce — Catalog Flow Observability
 
-**Assignment 01 — Observability in the Wild** | Software Architecture, 2024/2025
+**Assignment 01 — Observability in the Wild** | Software Architecture, 2025/2026
 
 ## About
 
