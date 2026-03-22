@@ -205,5 +205,3 @@ src/Presentation/Nop.Web/wwwroot/sitemaps/*
 !src/Presentation/Nop.Web/wwwroot/sitemaps/Index.htm
 src/packages/*
 src/Tests/Nop.Tests/Connections.resx
-notes.md
-metrics.md

@@ -20,65 +20,112 @@ This flow was chosen because it exercises all architectural layers (HTTP → Ser
 
 ---
 
+## Architecture Analysis
+
+### 1. How are the layers organised and what are the dependency rules?
+
+The `src/` directory is organised into four architectural layers:
+
+```
+src/
+├── Libraries/
+│   ├── Nop.Core        ← Domain model + contracts (zero project dependencies)
+│   ├── Nop.Data        ← Persistence via Linq2DB (depends on Nop.Core)
+│   └── Nop.Services    ← Business logic (depends on Nop.Core + Nop.Data)
+├── Presentation/
+│   ├── Nop.Web.Framework  ← Shared web infrastructure (depends on all Libraries)
+│   └── Nop.Web            ← ASP.NET Core MVC host (depends on everything)
+└── Plugins/            ← 31 modular extensions
+```
+
+The dependency graph is **strictly acyclic and top-down** (verified via `.csproj` ProjectReferences):
+
+| Project | References |
+|---------|-----------|
+| **Nop.Core** | None |
+| **Nop.Data** | Nop.Core |
+| **Nop.Services** | Nop.Core, Nop.Data |
+| **Nop.Web.Framework** | Nop.Core, Nop.Data, Nop.Services |
+| **Nop.Web** | All four lower-level projects |
+
+Communication between layers happens through three mechanisms:
+1. **Constructor injection (DI)** — the primary mechanism. `NopStartup.cs` (334 lines, `Order = 2000`) registers all interface-to-implementation bindings.
+2. **Event system** — `IEventPublisher` / `IConsumer<T>` for decoupled cross-layer communication (see below).
+3. **Service Locator** — `EngineContext.Current.Resolve<T>()` where constructor injection is impractical (e.g., static extension methods, middleware configuration).
+
+### 2. What is `IEventPublisher` and how is it used?
+
+nopCommerce implements a **synchronous, in-process Publish/Subscribe pattern** for internal events.
+
+```csharp
+// Nop.Core/Events/IEventPublisher.cs
+public partial interface IEventPublisher
+{
+    Task PublishAsync<TEvent>(TEvent @event);
+}
+
+// Nop.Services/Events/IConsumer.cs
+public partial interface IConsumer<T>
+{
+    Task HandleEventAsync(T eventMessage);
+}
+```
+
+The `IEventPublisher` interface lives in `Nop.Core` (accessible to all layers). The concrete `EventPublisher` lives in `Nop.Services` and is registered as a singleton.
+
+**Where events are published:**
+- **Data layer** (`EntityRepository.cs`) — automatically publishes `EntityInsertedAsync`, `EntityUpdatedAsync`, and `EntityDeletedAsync` after every CRUD operation (lines 349, 402, 452).
+- **Service layer** — publishes business events like `OrderPaidEvent`, `CustomerLoggedInEvent`.
+
+**How consumers are discovered:**
+All `IConsumer<T>` implementations across the solution (including plugins) are automatically discovered and registered during startup via `ITypeFinder` in `NopStartup.cs:305-312`.
+
+**Primary use case — cache invalidation:** There are **100+ `CacheEventConsumer` classes** in `Nop.Services/`, each subscribing to entity lifecycle events to clear relevant cache entries (e.g., `ProductCacheEventConsumer`, `CategoryCacheEventConsumer`). This decouples cache management from business logic.
+
+### 3. Where is observability easy vs. hard?
+
+**Where it is easy:**
+- **DI-based service registration** — every service is behind an interface (`IProductService`, `IRepository<T>`, `IStaticCacheManager`), enabling decorator/subclass-based instrumentation without modifying the original classes.
+- **`virtual` methods on services** — `ProductService.SearchProductsAsync()` and `GetProductByIdAsync()` are `virtual`, allowing subclass overrides that add tracing before delegating to `base`.
+- **`INopStartup` extension point** — the startup discovery mechanism (`ITypeFinder.FindClassesOfType<INopStartup>()`) allows an observability module to register middleware, override service registrations, and configure telemetry pipelines from a new startup class with a higher `Order` value.
+- **`partial class` pattern** — every entity and service is declared `partial`, enabling extension without modifying original files.
+
+**Where it is hard:**
+- **Linq2DB has no diagnostic events** — unlike EF Core, Linq2DB does not emit `DiagnosticSource` events. Database queries are invisible to standard tracing tools, requiring a manual decorator around `IRepository<T>`.
+- **Custom `ILogger` is not `Microsoft.Extensions.Logging.ILogger`** — nopCommerce defines its own database-backed logger (`Nop.Services.Logging.ILogger`). Standard .NET logging integrations (Serilog, OpenTelemetry LogExporter) do not capture application logs.
+- **No existing telemetry infrastructure** — zero `ActivitySource`, `DiagnosticSource`, or `OpenTelemetry` references in the original codebase. Everything was built from scratch.
+- **Event system limitations** — `IEventPublisher` only fires "after" events (no "before" events for timing) and only covers write operations, not reads like searches or product views.
+
+### 4. What structural changes would be needed, and are they worth it?
+
+| Change | Effort | Impact | Modifies Core? |
+|--------|--------|--------|----------------|
+| OpenTelemetry middleware via `INopStartup` | Very low | High — HTTP tracing out of the box | No |
+| `IRepository<T>` decorator for DB tracing | Low | High — all SQL operations visible | 1 file (DI registration) |
+| Service subclassing for catalog spans | Low | High — Search, Catalogue, Pricing spans | No (new files only) |
+| Cache decorator for hit/miss metrics | Low | Medium — cache effectiveness visibility | No (DI replacement) |
+| Bridge custom `ILogger` to `Microsoft.Extensions.Logging` | Low | High — structured logs with correlation | No |
+| Extend event system with read events | Medium | Medium — instrumentation via consumers | Yes |
+| Replace Service Locator with constructor injection | High | Low — indirect observability benefit | Yes |
+
+We implemented the first four changes. The key insight is that nopCommerce's DI and `INopStartup` patterns allow significant observability improvements with **minimal changes to original code** — the same extension mechanism used for plugins works for instrumentation.
+
+---
+
 ## Architecture Diagram
 
-<!-- TODO: Replace with actual architecture diagram image -->
-*[Insert architecture diagram here]*
+![Architecture Diagram](images/ASDiagram.drawio.png)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Browser / k6 Load Test                                         │
-│  GET /search?q=laptop    GET /product-slug                      │
-└──────────────┬──────────────────────┬───────────────────────────┘
-               │                      │
-┌──────────────▼──────────────────────▼───────────────────────────┐
-│  Nop.Web  (ASP.NET Core — auto-instrumented HTTP spans)         │
-│  CatalogController.Search()    ProductController.ProductDetails()│
-└──────────────┬──────────────────────┬───────────────────────────┘
-               │                      │
-┌──────────────▼──────────────────────▼───────────────────────────┐
-│  Nop.Web.Framework                                              │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │ OpenTelemetryStartup (INopStartup, Order=2001)             │ │
-│  │ InstrumentedProductService         → spans: Search,        │ │
-│  │                                      Catalogue             │ │
-│  │ InstrumentedPriceCalculationService → span: Pricing        │ │
-│  │ InstrumentedStaticCacheManager      → metrics: cache.hits, │ │
-│  │                                       cache.misses         │ │
-│  │ PiiSanitizingProcessor              → redacts PII          │ │
-│  └────────────────────────────────────────────────────────────┘ │
-└──────────────┬──────────────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────────────┐
-│  Nop.Services                                                   │
-│  CatalogInstrumentation (shared ActivitySource + Meter)          │
-│  ProductService (base class — virtual methods)                  │
-│  PriceCalculationService (base class — virtual methods)         │
-└──────────────┬──────────────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────────────┐
-│  Nop.Data                                                       │
-│  InstrumentedRepository<T> (decorator over EntityRepository<T>) │
-│  → spans: Repository.GetById, Repository.GetAllPaged, etc.     │
-│  → metric: database.query_duration_ms                           │
-│  EntityRepository<T> → Linq2DB → SQL Server 2019 Express        │
-└─────────────────────────────────────────────────────────────────┘
+The diagram shows the instrumented flow from top to bottom:
 
-         Telemetry Export
-         ┌──────┴──────┐
-    OTLP gRPC     Prometheus
-    (traces)      /metrics
-         │             │
-    ┌────▼───┐   ┌─────▼──────┐
-    │ Jaeger │   │ Prometheus │
-    │ :16686 │   │   :9090    │
-    └────┬───┘   └─────┬──────┘
-         └──────┬──────┘
-           ┌────▼────┐
-           │ Grafana │
-           │  :3000  │
-           └─────────┘
-```
+1. **Browser / k6** sends HTTP requests (`GET /search?q=...`, `GET /product-slug`) to the application.
+2. **Nop.Web** — the ASP.NET Core presentation layer. `CatalogController` handles search requests and `ProductController` handles product detail pages. HTTP spans are auto-instrumented by the OpenTelemetry ASP.NET Core library.
+3. **Nop.Web.Framework** — the instrumentation layer (all **new** files, shown in yellow). `OpenTelemetryStartup` configures the OpenTelemetry SDK and replaces original service registrations with instrumented versions. `InstrumentedProductService` creates `Search` and `Catalogue` spans. `InstrumentedPriceCalculationService` creates the `Pricing` span. `InstrumentedStaticCacheManager` records `cache.hits` and `cache.misses` counters. `PiiSanitizingProcessor` redacts sensitive data (emails, tokens, payment details) from all spans before export.
+4. **Nop.Services** — the business logic layer. `ProductService` and `PriceCalculationService` are the original base classes with `virtual` methods that our instrumented subclasses override. `CatalogInstrumentation` defines the shared `ActivitySource` ("NopCommerce.Catalog") and `Meter` used by all catalog instrumentation.
+5. **Nop.Data** — the persistence layer using Linq2DB. `InstrumentedRepository<T>` is a decorator (new) that wraps `EntityRepository<T>` (original), adding `Repository.*` spans and recording `database.query_duration_ms` for every database operation.
+6. **Database** — SQL Server 2019, running in Docker.
+
+**Telemetry export** (right side): traces are sent via OTLP gRPC to **Jaeger**, and metrics are scraped via `GET /metrics` by **Prometheus**. Both feed into **Grafana** for unified visualisation.
 
 ---
 
@@ -196,6 +243,69 @@ The load test simulates the full user journey:
 
 > Run the load test while watching the Grafana dashboard to see metrics and traces populate in real time.
 
+**k6 output:**
+
+```bash
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<8000' p(95)=3.28s
+
+    http_req_failed
+    ✓ 'rate<0.30' rate=12.15%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 18494  73.05694/s
+    checks_succeeded...: 94.69% 17513 out of 18494
+    checks_failed......: 5.30%  981 out of 18494
+
+    ✓ homepage 200
+    ✓ search 200
+    ✓ autocomplete 200
+    ✗ product ok
+      ↳  73% — ✓ 1366 / ✗ 497
+    ✗ product2 ok
+      ↳  74% — ✓ 1379 / ✗ 484
+    ✓ category ok
+    ✓ manufacturer ok
+    ✓ garbage search responded
+    ✓ invalid product handled
+    ✓ search2 200
+
+    HTTP
+    http_req_duration..............: avg=992.09ms min=4.41ms med=556.73ms max=11.1s p(90)=2.44s  p(95)=3.28s 
+      { expected_response:true }...: avg=1.07s    min=4.41ms med=608.72ms max=11.1s p(90)=2.59s  p(95)=3.45s 
+    http_req_failed................: 12.15% 3810 out of 31335
+    http_reqs......................: 31335  123.782806/s
+
+    EXECUTION
+    iteration_duration.............: avg=19.46s   min=3.51s  med=12.98s   max=1m8s  p(90)=36.91s p(95)=52.36s
+    iterations.....................: 1785   7.051294/s
+    vus............................: 1      min=1             max=250
+    vus_max........................: 250    min=250           max=250
+
+    NETWORK
+    data_received..................: 1.2 GB 4.9 MB/s
+    data_sent......................: 12 MB  46 kB/s
+
+
+
+
+running (4m13.1s), 000/250 VUs, 1785 complete and 78 interrupted iterations
+default ✓ [======================================] 000/250 VUs  4m0s
+```
+
+**Results analysis:** Both thresholds passed — P95 latency stayed under 8s (3.28s) and error rate under 30% (12.15%). The ~12% HTTP failures come from product detail pages returning 404 when the test tries to follow links extracted from search results that may point to non-existent slugs — these are HTTP-level errors that do not reach the instrumented service layer, which is why the `catalog.errors` metric in Grafana stays at zero. The 31,335 total requests across 250 VUs over ~4 minutes generated enough load to populate all Grafana dashboard panels.
+
+The screenshots below were taken during this load test run:
+
+**Grafana dashboard during load test:**
+
+![Grafana Dashboard — Metrics panels](images/grafana_during_k6_1.png)
+![Grafana Dashboard — Jaeger trace tables](images/grafana_during_k6_2.png)
+
 ### 5. Verify Traces in Jaeger
 
 1. Open http://localhost:16686
@@ -273,33 +383,12 @@ The `PiiSanitizingProcessor` (`BaseProcessor<Activity>`) runs centrally in the O
 
 ## Observability Stack
 
-All observability infrastructure runs in Docker via `docker-compose.observability.yml`:
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  nopCommerce (.NET 9, port 5050)                              │
-│  ├── /metrics  (Prometheus scrape endpoint)                   │
-│  └── OTLP gRPC (traces → localhost:4317)                      │
-└──────────┬────────────────────┬───────────────────────────────┘
-           │                    │
-  ┌────────▼────────┐  ┌───────▼────────┐
-  │   Prometheus     │  │    Jaeger       │
-  │   :9090          │  │    :16686       │
-  │   scrapes /metrics│  │    receives OTLP│
-  │   every 15s      │  │    traces       │
-  └────────┬────────┘  └───────┬────────┘
-           └────────┬──────────┘
-              ┌─────▼─────┐
-              │  Grafana   │
-              │  :3000     │
-              │  admin/admin│
-              └───────────┘
-```
+All observability infrastructure runs in Docker via `docker-compose.observability.yml`.
 
 **Provisioning (auto-configured on startup):**
 - `observability/grafana/provisioning/datasources/datasources.yml` — registers Prometheus (uid: `prometheus`) and Jaeger (uid: `jaeger`) datasources
 - `observability/grafana/provisioning/dashboards/dashboards.yml` — loads dashboards from `/var/lib/grafana/dashboards`
-- `observability/grafana/dashboards/nopcommerce.json` — the full dashboard definition (14 panels)
+- `observability/grafana/dashboards/nopcommerce.json` — the full dashboard definition (13 content panels + 4 section rows)
 - `observability/prometheus.yml` — scrapes `host.docker.internal:5050/metrics` every 15s
 
 ---
