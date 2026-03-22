@@ -116,7 +116,9 @@ public class InstrumentedProductService : ProductService
             //     throw new InvalidOperationException($"Erro simulado! Palavra pesquisada: {keywords}");
             // }
 
-            // Record sanitised search metadata (no PII)
+            // Record search metadata — keywords are included intentionally so that
+            // PiiSanitizingProcessor can demonstrate email redaction (e.g. "test@example.com" → "[EMAIL_REDACTED]")
+            activity?.SetTag("search.keywords", keywords ?? "");
             activity?.SetTag("search.has_keywords", !string.IsNullOrWhiteSpace(keywords));
             activity?.SetTag("search.category_filtered", categoryIds != null && categoryIds.Any(id => id > 0));
             activity?.SetTag("search.page_index", pageIndex);
