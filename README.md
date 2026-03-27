@@ -114,7 +114,7 @@ We implemented the first four changes. The key insight is that nopCommerce's DI 
 
 ## Architecture Diagram
 
-![Architecture Diagram](images/ASDiagram.drawio.png)
+![Architecture Diagram](assessment/diagrams/ASDiagram.drawio.png)
 
 The diagram shows the instrumented flow from top to bottom:
 
@@ -175,7 +175,7 @@ The application starts at **http://localhost:5050**.
 
 > **Note:** On macOS, port 5000 is used by AirPlay. The app is configured to use port 5050 in `src/Presentation/Nop.Web/App_Data/appsettings.json`.
 
-![e-commerce_main_page](images/e-commerce_main_page.png)
+![e-commerce_main_page](assessment/images/e-commerce_main_page.png)
 
 ### 3. View the Grafana Dashboard
 
@@ -221,9 +221,9 @@ Each table queries Jaeger for a specific operation, covering all layers of the f
 
 **Exported dashboard JSON:** [`observability/grafana/dashboards/nopcommerce.json`](observability/grafana/dashboards/nopcommerce.json)
 
-![Grafana Dashboard — Metrics panels](images/dashboard_grafana_1.png)
-![Grafana Dashboard — Jaeger trace tables](images/dashboard_grafana_2.png)
-![Grafana Dashboard - Jaeger trace ID details](images/dashboard_grafana_3.png)
+![Grafana Dashboard — Metrics panels](assessment/dashboards/dashboard_grafana_1.png)
+![Grafana Dashboard — Jaeger trace tables](assessment/dashboards/dashboard_grafana_2.png)
+![Grafana Dashboard - Jaeger trace ID details](assessment/dashboards/dashboard_grafana_3.png)
 
 ### 4. Run the Load Test
 
@@ -303,8 +303,8 @@ The screenshots below were taken during this load test run:
 
 **Grafana dashboard during load test:**
 
-![Grafana Dashboard — Metrics panels](images/grafana_during_k6_1.png)
-![Grafana Dashboard — Jaeger trace tables](images/grafana_during_k6_2.png)
+![Grafana Dashboard — Metrics panels](assessment/load-test/grafana_during_k6_1.png)
+![Grafana Dashboard — Jaeger trace tables](assessment/load-test/grafana_during_k6_2.png)
 
 ### 5. Verify Traces in Jaeger
 
@@ -377,7 +377,7 @@ The `PiiSanitizingProcessor` (`BaseProcessor<Activity>`) runs centrally in the O
 
 **How to verify:** Search for `test@example.com` in nopCommerce, then find the trace in Jaeger — the search keywords attribute will show `[EMAIL_REDACTED]` instead of the email.
 
-![PII_demonstration](images/PII_demonstration.png)
+![PII_demonstration](assessment/evidence/PII_demonstration.png)
 
 ---
 
